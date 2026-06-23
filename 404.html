@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>POS File Checker</title>
+  <!--
+    GitHub Pages SPA redirect.
+
+    When GitHub Pages cannot find a file it serves this 404.html instead.
+    This script saves the full requested URL into sessionStorage, then
+    redirects to the site root (index.html).
+
+    The decode script at the top of index.html reads sessionStorage.redirect
+    and calls history.replaceState() to restore the original URL before
+    React (or any routing logic) initialises.
+
+    This is the standard technique for SPAs on GitHub Pages.
+    Reference: https://github.com/rafgraph/spa-github-pages
+
+    segmentCount = 1  →  works for https://user.github.io/repo-name/
+    segmentCount = 0  →  use for a custom root domain
+  -->
+  <script>
+    var segmentCount = 1;
+    sessionStorage.redirect = location.href;
+    var l = window.location;
+    l.replace(
+      l.protocol + '//' + l.hostname +
+      (l.port ? ':' + l.port : '') +
+      l.pathname.split('/').slice(0, 1 + segmentCount).join('/') + '/'
+    );
+  </script>
+</head>
+<body>Redirecting&hellip;</body>
+</html>

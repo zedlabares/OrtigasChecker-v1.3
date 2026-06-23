@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0F1C2E" />
+  <meta name="description" content="Validate Ortigas .001 remittance files against admin-computed expected values. Runs entirely in your browser — files never leave your device." />
+
+  <!-- PWA / Apple -->
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="POSChecker" />
+
+  <!-- PWA manifest -->
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="icons/favicon.svg" />
+  <link rel="icon" type="image/x-icon"  href="icons/favicon.ico" />
+
+  <!-- Fonts (preconnect for LCP) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- App styles -->
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- ── Export libraries (loaded from CDN, no npm required) ── -->
+  <!--
+    jsPDF + AutoTable: PDF generation entirely in the browser.
+    Loaded with defer so they don't block first paint.
+    script.js checks window.jspdf before using them.
+  -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+          integrity="sha512-qZvrmS2zkdRfta600gigShMgMPiYj9FECM+oScwHDGAFmKCa9j+F6VEIGQFJhPWuOaRFm5arP5JO4UhAO/Aqw=="
+          crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"
+          integrity="sha512-4cBDnCiMSevnxkW7zQnCk9wnITMnYTK3NIjxAlzVUNs5bfJkCETNP6cAMaBVZ5DFCxbPb8VlmNHBDAAJbXNrg=="
+          crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
+  <!--
+    SheetJS (xlsx): Excel export entirely in the browser.
+  -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"
+          integrity="sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKnH4VkEebbY4zgDH+1BjMR2pFCQiYBGGBxFxALAd0DEhg=="
+          crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
+
+  <title>POS File Checker</title>
+
+  <!--
+    GitHub Pages SPA redirect: restores the URL that 404.html stored in
+    sessionStorage, so the page renders correctly after a hard-refresh or
+    direct link hit on GitHub Pages. Must run before the app script.
+  -->
+  <script>
+    (function () {
+      var r = sessionStorage.redirect;
+      delete sessionStorage.redirect;
+      if (r && r !== location.href) history.replaceState(null, null, r);
+    })();
+  </script>
+</head>
+
+<body>
+  <!-- ════════════════════════════════════════════════════════
+       HEADER
+       ════════════════════════════════════════════════════════ -->
+  <header id="app-header">
+    <div class="container">
+      <div class="header-brand">
+        <div class="header-icon">
+          <!-- Shield-check icon (inline SVG, no icon font needed) -->
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <polyline points="9 12 11 14 15 10"/>
+          </svg>
+        </div>
+        <div>
+          <p class="header-title">Tenant File Checker</p>
+          <p class="header-sub">Tenant Validator</p>
+        </div>
+      </div>
+      <span class="header-badge">Admin · Phase 1</span>
+    </div>
+  </header>
+
+  <!-- ════════════════════════════════════════════════════════
+       MAIN
+       ════════════════════════════════════════════════════════ -->
+  <main>
+    <div class="container">
+
+      <!-- Error banner (hidden until an error occurs) -->
+      <div id="error-banner" role="alert" aria-live="assertive">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <div>
+          <p class="error-title">Unable to process file</p>
+          <p id="error-msg" class="error-msg"></p>
+        </div>
+        <button id="error-close" class="error-close" aria-label="Dismiss error">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6"  y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- ── UPLOAD VIEW ──────────────────────────────────────── -->
+      <div id="upload-view">
+
+        <!-- Hero text -->
+        <div class="hero">
+          <h1>Validate your Ortigas Tenant file(s)</h1>
+          <p>
+            Upload one or more <code>.001</code>&ndash;<code>.999</code> files exported from your POS terminal.
+            Each file is checked against 11 critical fields (with a ±0.01 tolerance on monetary
+            comparisons) and reports Pass or Failed. Your files never leave this device.
+          </p>
+        </div>
+
+        <!-- Drop zone -->
+        <div
+          id="drop-zone"
+          role="button"
+          tabindex="0"
+          aria-label="Upload Tenant file(s) (.001 – .999) — click or drag and drop, multiple files supported"
+        >
+          <div id="drop-icon-box" class="drop-icon">
+            <!-- Populated by script.js on load -->
+          </div>
+          <div>
+            <p id="drop-text-primary" class="drop-text-primary">
+              Drop your <span>.001&nbsp;&ndash;&nbsp;.999</span> file(s) here
+            </p>
+            <p id="drop-text-secondary" class="drop-text-secondary">
+              or browse to select — multiple files supported
+            </p>
+          </div>
+          <p class="drop-text-hint">Ortigas Tenant files only · select multiple to validate as a batch</p>
+        </div>
+
+        <!-- Hidden real file input.
+             multiple: allows selecting more than one file in the OS picker.
+             The accept attribute lists every valid extension as a hint to
+             the OS file picker. This is advisory only — the browser does
+             not enforce it. Real validation is done in isValidPosExtension()
+             inside script.js.
+             Generating all 999 entries keeps the picker filtered correctly
+             on browsers that respect the attribute (Chrome, Edge, Safari).
+             .000 is intentionally omitted — no POS terminal produces it. -->
+        <input
+          id="file-input"
+          type="file"
+          multiple
+          accept=".001,.002,.003,.004,.005,.006,.007,.008,.009,.010,.011,.012,.013,.014,.015,.016,.017,.018,.019,.020,.021,.022,.023,.024,.025,.026,.027,.028,.029,.030,.031,.032,.033,.034,.035,.036,.037,.038,.039,.040,.041,.042,.043,.044,.045,.046,.047,.048,.049,.050,.051,.052,.053,.054,.055,.056,.057,.058,.059,.060,.061,.062,.063,.064,.065,.066,.067,.068,.069,.070,.071,.072,.073,.074,.075,.076,.077,.078,.079,.080,.081,.082,.083,.084,.085,.086,.087,.088,.089,.090,.091,.092,.093,.094,.095,.096,.097,.098,.099,.100,.101,.102,.103,.104,.105,.106,.107,.108,.109,.110,.111,.112,.113,.114,.115,.116,.117,.118,.119,.120,.121,.122,.123,.124,.125,.126,.127,.128,.129,.130,.131,.132,.133,.134,.135,.136,.137,.138,.139,.140,.141,.142,.143,.144,.145,.146,.147,.148,.149,.150,.151,.152,.153,.154,.155,.156,.157,.158,.159,.160,.161,.162,.163,.164,.165,.166,.167,.168,.169,.170,.171,.172,.173,.174,.175,.176,.177,.178,.179,.180,.181,.182,.183,.184,.185,.186,.187,.188,.189,.190,.191,.192,.193,.194,.195,.196,.197,.198,.199,.200,.201,.202,.203,.204,.205,.206,.207,.208,.209,.210,.211,.212,.213,.214,.215,.216,.217,.218,.219,.220,.221,.222,.223,.224,.225,.226,.227,.228,.229,.230,.231,.232,.233,.234,.235,.236,.237,.238,.239,.240,.241,.242,.243,.244,.245,.246,.247,.248,.249,.250,.251,.252,.253,.254,.255,.256,.257,.258,.259,.260,.261,.262,.263,.264,.265,.266,.267,.268,.269,.270,.271,.272,.273,.274,.275,.276,.277,.278,.279,.280,.281,.282,.283,.284,.285,.286,.287,.288,.289,.290,.291,.292,.293,.294,.295,.296,.297,.298,.299,.300,.301,.302,.303,.304,.305,.306,.307,.308,.309,.310,.311,.312,.313,.314,.315,.316,.317,.318,.319,.320,.321,.322,.323,.324,.325,.326,.327,.328,.329,.330,.331,.332,.333,.334,.335,.336,.337,.338,.339,.340,.341,.342,.343,.344,.345,.346,.347,.348,.349,.350,.351,.352,.353,.354,.355,.356,.357,.358,.359,.360,.361,.362,.363,.364,.365,.366,.367,.368,.369,.370,.371,.372,.373,.374,.375,.376,.377,.378,.379,.380,.381,.382,.383,.384,.385,.386,.387,.388,.389,.390,.391,.392,.393,.394,.395,.396,.397,.398,.399,.400,.401,.402,.403,.404,.405,.406,.407,.408,.409,.410,.411,.412,.413,.414,.415,.416,.417,.418,.419,.420,.421,.422,.423,.424,.425,.426,.427,.428,.429,.430,.431,.432,.433,.434,.435,.436,.437,.438,.439,.440,.441,.442,.443,.444,.445,.446,.447,.448,.449,.450,.451,.452,.453,.454,.455,.456,.457,.458,.459,.460,.461,.462,.463,.464,.465,.466,.467,.468,.469,.470,.471,.472,.473,.474,.475,.476,.477,.478,.479,.480,.481,.482,.483,.484,.485,.486,.487,.488,.489,.490,.491,.492,.493,.494,.495,.496,.497,.498,.499,.500,.501,.502,.503,.504,.505,.506,.507,.508,.509,.510,.511,.512,.513,.514,.515,.516,.517,.518,.519,.520,.521,.522,.523,.524,.525,.526,.527,.528,.529,.530,.531,.532,.533,.534,.535,.536,.537,.538,.539,.540,.541,.542,.543,.544,.545,.546,.547,.548,.549,.550,.551,.552,.553,.554,.555,.556,.557,.558,.559,.560,.561,.562,.563,.564,.565,.566,.567,.568,.569,.570,.571,.572,.573,.574,.575,.576,.577,.578,.579,.580,.581,.582,.583,.584,.585,.586,.587,.588,.589,.590,.591,.592,.593,.594,.595,.596,.597,.598,.599,.600,.601,.602,.603,.604,.605,.606,.607,.608,.609,.610,.611,.612,.613,.614,.615,.616,.617,.618,.619,.620,.621,.622,.623,.624,.625,.626,.627,.628,.629,.630,.631,.632,.633,.634,.635,.636,.637,.638,.639,.640,.641,.642,.643,.644,.645,.646,.647,.648,.649,.650,.651,.652,.653,.654,.655,.656,.657,.658,.659,.660,.661,.662,.663,.664,.665,.666,.667,.668,.669,.670,.671,.672,.673,.674,.675,.676,.677,.678,.679,.680,.681,.682,.683,.684,.685,.686,.687,.688,.689,.690,.691,.692,.693,.694,.695,.696,.697,.698,.699,.700,.701,.702,.703,.704,.705,.706,.707,.708,.709,.710,.711,.712,.713,.714,.715,.716,.717,.718,.719,.720,.721,.722,.723,.724,.725,.726,.727,.728,.729,.730,.731,.732,.733,.734,.735,.736,.737,.738,.739,.740,.741,.742,.743,.744,.745,.746,.747,.748,.749,.750,.751,.752,.753,.754,.755,.756,.757,.758,.759,.760,.761,.762,.763,.764,.765,.766,.767,.768,.769,.770,.771,.772,.773,.774,.775,.776,.777,.778,.779,.780,.781,.782,.783,.784,.785,.786,.787,.788,.789,.790,.791,.792,.793,.794,.795,.796,.797,.798,.799,.800,.801,.802,.803,.804,.805,.806,.807,.808,.809,.810,.811,.812,.813,.814,.815,.816,.817,.818,.819,.820,.821,.822,.823,.824,.825,.826,.827,.828,.829,.830,.831,.832,.833,.834,.835,.836,.837,.838,.839,.840,.841,.842,.843,.844,.845,.846,.847,.848,.849,.850,.851,.852,.853,.854,.855,.856,.857,.858,.859,.860,.861,.862,.863,.864,.865,.866,.867,.868,.869,.870,.871,.872,.873,.874,.875,.876,.877,.878,.879,.880,.881,.882,.883,.884,.885,.886,.887,.888,.889,.890,.891,.892,.893,.894,.895,.896,.897,.898,.899,.900,.901,.902,.903,.904,.905,.906,.907,.908,.909,.910,.911,.912,.913,.914,.915,.916,.917,.918,.919,.920,.921,.922,.923,.924,.925,.926,.927,.928,.929,.930,.931,.932,.933,.934,.935,.936,.937,.938,.939,.940,.941,.942,.943,.944,.945,.946,.947,.948,.949,.950,.951,.952,.953,.954,.955,.956,.957,.958,.959,.960,.961,.962,.963,.964,.965,.966,.967,.968,.969,.970,.971,.972,.973,.974,.975,.976,.977,.978,.979,.980,.981,.982,.983,.984,.985,.986,.987,.988,.989,.990,.991,.992,.993,.994,.995,.996,.997,.998,.999"
+          aria-hidden="true"
+          style="display:none"
+        />
+
+        <!-- How it works -->
+        <div class="how-it-works">
+          <p class="how-it-works-label">How it works</p>
+          <div class="how-steps">
+            <div>
+              <div class="how-step-num">1</div>
+              <p class="how-step-title">Upload</p>
+              <p class="how-step-desc">Select or drop one or more .001&ndash;.999 POS files</p>
+            </div>
+            <div>
+              <div class="how-step-num">2</div>
+              <p class="how-step-title">Parse</p>
+              <p class="how-step-desc">65 line items decoded per file from fixed-width format</p>
+            </div>
+            <div>
+              <div class="how-step-num">3</div>
+              <p class="how-step-title">Calculate</p>
+              <p class="how-step-desc">Admin values derived using VAT 12/112 rules</p>
+            </div>
+            <div>
+              <div class="how-step-num">4</div>
+              <p class="how-step-title">Validate</p>
+              <p class="how-step-desc">11 fields per file compared with ±0.01 tolerance</p>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /#upload-view -->
+
+      <!-- ── BATCH SUMMARY VIEW (shown after one or more files are processed) ── -->
+      <div id="summary-view" aria-live="polite">
+
+        <!-- Overall batch result banner -->
+        <div id="batch-result-banner" class="result-banner" role="status"></div>
+
+        <!-- Action row -->
+        <div class="meta-row">
+          <div>
+            <p class="results-title">Batch Results</p>
+            <p id="summary-subtitle" class="results-sub"></p>
+          </div>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+            <button id="btn-export-batch" class="btn-export secondary">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <line x1="3"  y1="9"  x2="21" y2="9"/>
+                <line x1="3"  y1="15" x2="21" y2="15"/>
+                <line x1="9"  y1="3"  x2="9"  y2="21"/>
+                <line x1="15" y1="3"  x2="15" y2="21"/>
+              </svg>
+              Export Batch Summary
+            </button>
+            <button id="btn-add-more" class="btn-reset">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Add More Files
+            </button>
+            <button id="btn-clear-all" class="btn-reset">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <polyline points="1 4 1 10 7 10"/>
+                <path d="M3.51 15a9 9 0 1 0 .49-4.95"/>
+              </svg>
+              Clear All Files
+            </button>
+          </div>
+        </div>
+
+        <!-- Aggregate stat cards: Total Files Processed / Total PASS / Total FAIL -->
+        <div class="stat-cards">
+          <div class="stat-card pass">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+            <div>
+              <p id="batch-stat-pass" class="stat-num">0</p>
+              <p class="stat-lbl">Total PASS</p>
+            </div>
+          </div>
+          <div class="stat-card fail">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="15" y1="9" x2="9" y2="15"/>
+              <line x1="9"  y1="9" x2="15" y2="15"/>
+            </svg>
+            <div>
+              <p id="batch-stat-fail" class="stat-num">0</p>
+              <p class="stat-lbl">Total FAIL</p>
+            </div>
+          </div>
+          <div class="stat-card total">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
+            </svg>
+            <div>
+              <p id="batch-stat-total" class="stat-num">0</p>
+              <p class="stat-lbl">Total Files Processed</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Per-file summary table — click a row to view its detailed report -->
+        <div class="table-wrap">
+          <table id="summary-table" aria-label="Batch validation summary">
+            <thead>
+              <tr>
+                <th class="center" scope="col">#</th>
+                <th scope="col">File Name</th>
+                <th class="center" scope="col">Status</th>
+                <th class="right" scope="col">Failed Checks</th>
+                <th class="center" scope="col"></th>
+              </tr>
+            </thead>
+            <tbody id="summary-table-body">
+              <!-- Populated by script.js -->
+            </tbody>
+          </table>
+        </div>
+
+      </div><!-- /#summary-view -->
+
+      <!-- ── DETAIL VIEW (single-file validation report) ─────────────── -->
+      <div id="results-view" aria-live="polite">
+
+        <!-- Overall result banner -->
+        <div id="result-banner" class="result-banner" role="status"></div>
+
+        <!-- File metadata + navigation -->
+        <div class="meta-row">
+          <div id="meta-pills" class="meta-pills"></div>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+            <button id="btn-back-to-summary" class="btn-reset">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <polyline points="15 18 9 12 15 6"/>
+              </svg>
+              Back to Summary
+            </button>
+            <button id="btn-reset" class="btn-reset">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <polyline points="1 4 1 10 7 10"/>
+                <path d="M3.51 15a9 9 0 1 0 .49-4.95"/>
+              </svg>
+              Clear All Files
+            </button>
+          </div>
+        </div>
+
+        <!-- Stat cards -->
+        <div class="stat-cards">
+          <div class="stat-card pass">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+            <div>
+              <p id="stat-passed" class="stat-num">0</p>
+              <p class="stat-lbl">Passed</p>
+            </div>
+          </div>
+          <div class="stat-card fail">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="15" y1="9" x2="9" y2="15"/>
+              <line x1="9"  y1="9" x2="15" y2="15"/>
+            </svg>
+            <div>
+              <p id="stat-failed" class="stat-num">0</p>
+              <p class="stat-lbl">Failed</p>
+            </div>
+          </div>
+          <div class="stat-card total">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
+            </svg>
+            <div>
+              <p id="stat-total" class="stat-num">0</p>
+              <p class="stat-lbl">Checked</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Results header: title + export buttons -->
+        <div class="results-header">
+          <div>
+            <p class="results-title">Validation Detail</p>
+            <p id="results-subtitle" class="results-sub"></p>
+          </div>
+          <div class="export-btns">
+            <button id="btn-export-pdf" class="btn-export primary">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Export PDF
+            </button>
+            <button id="btn-export-excel" class="btn-export secondary">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <line x1="3"  y1="9"  x2="21" y2="9"/>
+                <line x1="3"  y1="15" x2="21" y2="15"/>
+                <line x1="9"  y1="3"  x2="9"  y2="21"/>
+                <line x1="15" y1="3"  x2="15" y2="21"/>
+              </svg>
+              Export Excel
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter tabs -->
+        <div class="filter-tabs" role="tablist" aria-label="Filter validation rows">
+          <button class="filter-tab active" role="tab" data-filter="all"
+                  aria-selected="true">
+            All Lines
+            <span id="tab-count-all" class="tab-count">65</span>
+          </button>
+          <button class="filter-tab" role="tab" data-filter="validated"
+                  aria-selected="false">
+            Validated Only
+            <span id="tab-count-val" class="tab-count">11</span>
+          </button>
+          <button class="filter-tab" role="tab" data-filter="failed"
+                  aria-selected="false">
+            Failed
+            <span id="tab-count-fail" class="tab-count">0</span>
+          </button>
+        </div>
+
+        <!-- Validation table -->
+        <div class="table-wrap">
+          <table id="validation-table" aria-label="Validation results">
+            <thead>
+              <tr>
+                <th class="center" scope="col">#</th>
+                <th scope="col">Line Item Definition</th>
+                <th class="right" scope="col">Tenant File Value</th>
+                <th class="right" scope="col">Admin Expected</th>
+                <th class="center" scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody id="table-body">
+              <!-- Populated by script.js -->
+            </tbody>
+          </table>
+        </div>
+
+      </div><!-- /#results-view -->
+
+    </div><!-- /.container -->
+  </main>
+
+  <!-- ════════════════════════════════════════════════════════
+       FOOTER
+       ════════════════════════════════════════════════════════ -->
+  <footer>
+    POS File Checker &nbsp;·&nbsp;
+    Files are processed locally in your browser and never uploaded to any server.
+  </footer>
+
+  <!-- App logic (must be last so all DOM elements exist) -->
+  <script src="script.js"></script>
+
+  <!-- Service worker registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function (err) {
+          console.warn('Service worker registration failed:', err);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
